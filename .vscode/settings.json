@@ -14,10 +14,12 @@
     "rust-analyzer.lru.capacity": 1000,
     "rust-analyzer.linkedProjects": [
         "./Cargo.toml",
-       // "./galois/Cargo.toml",
+        "./example/Cargo.toml",
+        // "./galois/Cargo.toml",
         //"./searchlite/Cargo.toml",
         // "./galois/Cargo.toml",
-       // "./galois/example/Cargo.toml",
+        // "./galois/example/Cargo.toml",
     ],
     "python.pythonPath": "/usr/local/bin/python3.9",
+    "editor.fontSize": 13,
 }

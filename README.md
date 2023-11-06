@@ -1,2 +1,2 @@
 # aerogel
-Rust concurrency library
+Go GMP asynchronous model written in rust
