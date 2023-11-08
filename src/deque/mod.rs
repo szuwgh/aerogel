@@ -704,6 +704,131 @@ impl<T> Stealer<T> {
         self.steal_batch_with_limit(dest, MAX_BATCH)
     }
 
+    pub fn steal_batch_to_injector(&self, dest: &Injector<T>, limit: usize) -> Steal<()> {
+        assert!(limit > 0);
+
+        // Load the front index.
+        let mut f = self.inner.front.load(Ordering::Acquire);
+
+        // A SeqCst fence is needed here.
+        //
+        // If the current thread is already pinned (reentrantly), we must manually issue the
+        // fence. Otherwise, the following pinning will issue the fence anyway, so we don't
+        // have to.
+        if epoch::is_pinned() {
+            atomic::fence(Ordering::SeqCst);
+        }
+
+        let guard = &epoch::pin();
+
+        // Load the back index.
+        let b = self.inner.back.load(Ordering::Acquire);
+
+        // Is the queue empty?
+        let len = b.wrapping_sub(f);
+        if len <= 0 {
+            return Steal::Empty;
+        }
+
+        // Reserve capacity for the stolen batch.
+        let batch_size = cmp::min((len as usize + 1) / 2, limit) as isize;
+        //let batch_size = limit as isize;
+        let mut tail: usize = dest.tail.index.load(Ordering::Acquire);
+        let mut block = dest.tail.block.load(Ordering::Acquire);
+
+        let backoff = Backoff::new();
+        // Load the buffer.
+        let buffer = self.inner.buffer.load(Ordering::Acquire, guard);
+
+        for i in 0..batch_size {
+            unsafe {
+                let task = buffer.deref().read(f.wrapping_add(i));
+                let mut next_block = None;
+                loop {
+                    // Calculate the offset of the index into the block.
+                    let offset = (tail >> SHIFT) % LAP;
+
+                    // If we reached the end of the block, wait until the next one is installed.
+                    if offset == BLOCK_CAP {
+                        backoff.snooze();
+                        tail = dest.tail.index.load(Ordering::Acquire);
+                        block = dest.tail.block.load(Ordering::Acquire);
+                        continue;
+                    }
+
+                    // If we're going to have to install the next block, allocate it in advance in order to
+                    // make the wait for other threads as short as possible.
+                    if offset + 1 == BLOCK_CAP && next_block.is_none() {
+                        next_block = Some(Box::new(Block::<T>::new()));
+                    }
+
+                    let new_tail = tail + (1 << SHIFT);
+
+                    // Try advancing the tail forward.
+                    match dest.tail.index.compare_exchange_weak(
+                        tail,
+                        new_tail,
+                        Ordering::SeqCst,
+                        Ordering::Acquire,
+                    ) {
+                        Ok(_) => {
+                            // If we've reached the end of the block, install the next one.
+                            if offset + 1 == BLOCK_CAP {
+                                let next_block = Box::into_raw(next_block.unwrap());
+                                let next_index = new_tail.wrapping_add(1 << SHIFT);
+
+                                dest.tail.block.store(next_block, Ordering::Release);
+                                dest.tail.index.store(next_index, Ordering::Release);
+                                (*block).next.store(next_block, Ordering::Release);
+                            }
+
+                            // Write the task into the slot.
+                            let slot = (*block).slots.get_unchecked(offset);
+                            slot.task.get().write(task);
+                            slot.state.fetch_or(WRITE, Ordering::Release);
+                            break;
+                        }
+                        Err(t) => {
+                            tail = t;
+                            block = dest.tail.block.load(Ordering::Acquire);
+                            backoff.spin();
+                        }
+                    }
+                }
+            }
+        }
+
+        // Try incrementing the front index to steal the batch.
+        // If the buffer has been swapped or the increment fails, we retry.
+        if self.inner.buffer.load(Ordering::Acquire, guard) != buffer
+            || self
+                .inner
+                .front
+                .compare_exchange(
+                    f,
+                    f.wrapping_add(batch_size),
+                    Ordering::SeqCst,
+                    Ordering::Relaxed,
+                )
+                .is_err()
+        {
+            return Steal::Retry;
+        }
+
+        // dest_b = dest_b.wrapping_add(batch_size);
+
+        atomic::fence(Ordering::Release);
+
+        // Update the back index in the destination queue.
+        //
+        // This ordering could be `Relaxed`, but then thread sanitizer would falsely report data
+        // races because it doesn't understand fences.
+        // dest.inner.back.store(dest_b, Ordering::Release);
+
+        // Return with success.
+        Steal::Success(())
+    }
+
     /// Steals no more than `limit` of tasks and pushes them into another worker.
     ///
     /// How many tasks exactly will be stolen is not specified. That said, this method will try to
@@ -2209,7 +2334,7 @@ mod tests {
     use super::*;
 
     #[test]
-    fn test_deque() {
+    fn test_cap_deque() {
         let q = Worker::<i32>::new_fifo(4);
         q.push(0).unwrap();
         q.push(1).unwrap();
@@ -2223,5 +2348,54 @@ mod tests {
         q.push(5).unwrap();
         q.push(6).unwrap();
         q.push(0).unwrap();
+    }
+
+    #[test]
+    fn test_steal_batch_to_injector() {
+        let q1 = Worker::<i32>::new_fifo(32);
+        q1.push(0).unwrap();
+        q1.push(1).unwrap();
+        q1.push(2).unwrap();
+        q1.push(3).unwrap();
+        q1.push(4).unwrap();
+        q1.push(5).unwrap();
+        q1.push(6).unwrap();
+        q1.push(7).unwrap();
+
+        let q2 = Worker::<i32>::new_fifo(32);
+        q2.push(0).unwrap();
+        q2.push(1).unwrap();
+        q2.push(2).unwrap();
+        q2.push(3).unwrap();
+        q2.push(4).unwrap();
+        q2.push(5).unwrap();
+        q2.push(6).unwrap();
+        q2.push(7).unwrap();
+
+        let i = Injector::<i32>::new();
+        let s1 = q1.stealer();
+        s1.steal_batch_to_injector(&i, 6);
+
+        let q2 = Worker::<i32>::new_fifo(32);
+
+        i.steal_batch(&q2);
+        while let Some(v) = q2.pop() {
+            println!("q2:{:?}", v);
+        }
+        i.steal_batch(&q2);
+        while let Some(v) = q2.pop() {
+            println!("q2:{:?}", v);
+        }
+        i.steal_batch(&q2);
+        while let Some(v) = q2.pop() {
+            println!("q2:{:?}", v);
+        }
+        i.steal_batch(&q2);
+        while let Some(v) = q2.pop() {
+            println!("q2:{:?}", v);
+        }
+        // while let Some(v) = i.pop() {
+        //     println!("i:{:?}", v);
+        // }
     }
 }

@@ -1,4 +1,3 @@
-use crate::coroutine::{Coroutine, Routine};
 use crate::deque::{Steal, Stealer};
 use crate::park::{Parker, UnParker};
 use crate::queue::LocalQueue;
@@ -6,34 +5,41 @@ use crate::queue::LQ_HALF_SIZE;
 use crate::queue::{self, GlobalQueue};
 use crate::rand::RandomOrder;
 use crate::rand::{seed, FastRand};
-use core::cmp::min;
+use core::cmp;
 use futures::future::Future;
 use futures::FutureExt;
 pub(crate) use parking_lot::Mutex;
 use scoped_tls::scoped_thread_local;
-use std::cell::RefCell;
+use std::cell::{RefCell, UnsafeCell};
 use std::rc::Rc;
 use std::sync::Arc;
 scoped_thread_local!(pub(crate) static EX: Executor);
-
+use crate::queue::Coroutine;
+use crate::queue::LocalScheduler;
+use crate::task::new_task;
+use crate::task::JoinHandle;
+use core::cell::Cell;
 pub struct Executor(pub(crate) Arc<Processor>);
 
-impl Executor {
-    pub(crate) fn spawn(fut: impl Future<Output = ()> + 'static) {
-        EX.with(|ex| {
-            let t = Rc::new(Routine::new(
-                RefCell::new(fut.boxed_local()),
-                ex.0.local.parker.unpark(),
-            ));
-            ex.0.push(t);
-            ex.0.unpark_one();
-        });
-    }
-}
+// impl Executor {
+//     pub(crate) fn spawn<T>(fut: T) -> JoinHandle<T::Output>
+//     where
+//         T: Future + Send + 'static,
+//     {
+//         let (task, join) = new_task(fut, LocalScheduler);
+//         EX.with(|ex| {
+//             //let t = Coroutine::new(Routine::new(RefCell::new(fut.boxed_local())));
+//             ex.0.push(task);
+//             ex.0.unpark_one();
+//         });
+
+//         join
+//     }
+// }
 
 pub(crate) fn run(p: Arc<Processor>) {
     let cx = Executor(p);
-    EX.set(&cx, || {
+    EX.set(&cx, || loop {
         cx.0.schedule();
     });
 }
@@ -141,30 +147,54 @@ impl Processor {
     }
 
     pub(crate) fn push(&self, t: Coroutine) {
-        let _ = self.local.queue.push(t);
+        let _ = self
+            .local
+            .queue
+            .push(t)
+            .or_else(|e| -> Result<(), Coroutine> {
+                let size = self.local.queue.len() / 2;
+                for _ in 0..size {
+                    if let Some(v) = self.local.queue.pop() {
+                        self.shard.queue.push(v);
+                    }
+                }
+                self.shard.queue.push(e);
+                Ok(())
+            });
     }
 
     //调度
     pub(crate) fn schedule(&self) {
         //本地队列
         while let Some(t) = self.local.queue.pop() {
-            t.run()
+            // println!("run in : p{}", self.index);
+            t.run();
         }
         // steal 偷
         // 从全局队列偷 从其他队列偷
+        if let Some(t) = self
+            .steal_from_global()
+            .or_else(|| self.steal_from_others())
+        {
+            t.run();
+            return;
+        }
 
         self.park();
     }
 
-    pub(crate) fn steal_from_global(&self) -> Option<Rc<Routine>> {
+    pub(crate) fn steal_from_global(&self) -> Option<Coroutine> {
         // n =  min(len(GQ) / GOMAXPROCS +  1,  cap(LQ) / 2 ) 偷取公式
         // GQ：全局队列总长度（队列中现在元素的个数）
         // GOMAXPROCS：p的个数
         // 至少从全局队列取1个g，但每次不要从全局队列移动太多的g到p本地队列，给其他p留点。这是从全局队列到P本地队列的负载均衡
-        let n = min(
+        let n = cmp::min(
             self.shard.queue.len() / self.shard.others.len() + 1,
             LQ_HALF_SIZE,
         );
+        if n == 0 {
+            return None;
+        }
         for _ in 0..3 {
             let t = self
                 .shard
@@ -172,14 +202,17 @@ impl Processor {
                 .steal_batch_with_limit_and_pop(self.local.queue.get_ref(), n);
             match t {
                 Steal::Empty => return None,
-                Steal::Success(t1) => return Some(t1),
+                Steal::Success(t1) => {
+                    //   println!("steal global run");
+                    return Some(t1);
+                }
                 Steal::Retry => continue,
             }
         }
         None
     }
 
-    pub(crate) fn steal_from_others(&self) -> Option<Rc<Routine>> {
+    pub(crate) fn steal_from_others(&self) -> Option<Coroutine> {
         for i in self
             .shard
             .steal_order
@@ -191,11 +224,17 @@ impl Processor {
             //从其他有G的P哪里偷取一半G过来，放到自己的P本地队列
 
             let stealer = self.shard.others[i].queue.stealer();
-            let n = stealer.len() / 2;
+            let n = cmp::max(1, stealer.len() / 2);
+            if n == 0 {
+                continue;
+            }
             let t = stealer.steal_batch_with_limit_and_pop(self.local.queue.get_ref(), n);
             match t {
                 Steal::Empty => continue,
-                Steal::Success(t1) => return Some(t1),
+                Steal::Success(t1) => {
+                    //   println!("steal other run in : p{}", i);
+                    return Some(t1);
+                }
                 Steal::Retry => continue,
             }
         }

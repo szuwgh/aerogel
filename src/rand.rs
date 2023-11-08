@@ -149,7 +149,7 @@ mod tests {
     #[test]
     fn test_randenum() {
         let fast_rand = FastRand::new(seed());
-        let random_order = RandomOrder::new(5);
+        let random_order = RandomOrder::new(3);
         println!("{:?}", random_order.coprimes);
         for i in random_order.start(fast_rand.fastrand() as usize) {
             println!("{}", i);

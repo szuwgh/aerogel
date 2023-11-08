@@ -1,11 +1,29 @@
-use crate::coroutine::Coroutine;
 use crate::deque::Injector;
 use crate::deque::Steal;
 use crate::deque::Stealer;
 use crate::deque::Worker;
-
+use crate::task::Schedule;
 const LQ_SIZE: usize = 256;
 pub(crate) const LQ_HALF_SIZE: usize = LQ_SIZE / 2;
+use crate::task::Task;
+
+use crate::processor::EX;
+
+pub(crate) type Coroutine = Task<LocalScheduler>;
+pub(crate) struct LocalScheduler;
+
+impl Schedule for LocalScheduler {
+    fn schedule(&self, task: Coroutine) {
+        EX.with(|ex| {
+            ex.0.push(task);
+            ex.0.unpark_one();
+        });
+    }
+
+    fn yield_now(&self, task: Coroutine) {
+        self.schedule(task)
+    }
+}
 
 pub(crate) struct LocalQueue {
     queue: Worker<Coroutine>,
@@ -19,6 +37,10 @@ impl LocalQueue {
     }
     pub(crate) fn pop(&self) -> Option<Coroutine> {
         self.queue.pop()
+    }
+
+    pub(crate) fn len(&self) -> usize {
+        self.queue.len()
     }
 
     pub(crate) fn push(&self, t: Coroutine) -> Result<(), Coroutine> {
@@ -51,6 +73,10 @@ impl GlobalQueue {
 
     pub(crate) fn len(&self) -> usize {
         self.queue.len()
+    }
+
+    pub(crate) fn get_ref(&self) -> &Injector<Coroutine> {
+        &self.queue
     }
 
     pub(crate) fn steal_batch_with_limit_and_pop(

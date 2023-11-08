@@ -1,11 +1,17 @@
 #![feature(lazy_cell)]
 #![feature(thread_id_value)]
+#![feature(thread_local)]
+
+#[macro_use]
+pub mod macros;
+//mod cell;
 mod coroutine;
 mod deque;
 mod park;
 pub mod processor;
 mod queue;
 mod reactor;
+mod task;
 use crate::park::Parker;
 use crate::processor::Processor;
 use crate::processor::{run, EX};
@@ -16,6 +22,9 @@ use processor::{Executor, Local, Other, Shard};
 use std::sync::Arc;
 use std::task::Wake;
 mod rand;
+use crate::queue::LocalScheduler;
+use crate::task::new_task;
+use crate::task::JoinHandle;
 use std::{
     mem,
     pin::Pin,
@@ -32,8 +41,18 @@ fn go() {}
 
 fn chan() {}
 
-pub fn spawn(fut: impl Future<Output = ()> + 'static) {
-    Executor::spawn(fut)
+pub fn spawn<T>(fut: T) -> JoinHandle<T::Output>
+where
+    T: Future + Send + 'static,
+{
+    let (task, join) = new_task(0, fut, LocalScheduler);
+    EX.with(|ex| {
+        //let t = Coroutine::new(Routine::new(RefCell::new(fut.boxed_local())));
+        ex.0.push(task);
+        ex.0.unpark_one();
+    });
+
+    join
 }
 
 impl Runtime {
@@ -71,7 +90,7 @@ impl Runtime {
         EX.set(&cxe, || loop {
             match Future::poll(future.as_mut(), &mut cx) {
                 Poll::Ready(val) => {
-                    cxe.0.schedule();
+                    // cxe.0.schedule();
                     break val;
                 }
                 Poll::Pending => {
