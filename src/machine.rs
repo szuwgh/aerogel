@@ -11,7 +11,8 @@ pub(crate) struct ThreadPool;
 
 impl ThreadPool {
     pub(crate) fn launch(ps: &mut Vec<Arc<Processor>>) {
-        for p in ps.drain(..(ps.len() - 1)) {
+        for (i,p) in ps.drain(..(ps.len()-1)).enumerate() {
+            println!("{}",i);
             thread::spawn(|| processor::run(p));
         }
     }

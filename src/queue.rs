@@ -2,6 +2,7 @@ use crate::task::Schedule;
 
 use crate::processor::EX;
 use crate::task::Task;
+use crossbeam_deque::Injector;
 use crossbeam_deque::Steal;
 use crossbeam_deque::Stealer;
 use crossbeam_deque::Worker;
@@ -53,10 +54,10 @@ impl LocalQueue {
         self.queue.stealer()
     }
 
-    pub(crate) fn steal_batch_with_limit(&self, dest: &Worker<Coroutine>, limit: usize) {
-        let s: Stealer<Task<LocalScheduler>> = self.queue.stealer();
-        let _ = s.steal_batch_with_limit(dest, limit);
-    }
+    // pub(crate) fn steal_batch_with_limit(&self, dest: &Worker<Coroutine>, limit: usize) {
+    //     let s: Stealer<Task<LocalScheduler>> = self.queue.stealer();
+    //     let _ = s.steal_batch_with_limit(dest, limit);
+    // }
 
     pub(crate) fn get_ref(&self) -> &Worker<Coroutine> {
         &self.queue
@@ -64,13 +65,13 @@ impl LocalQueue {
 }
 
 pub(crate) struct GlobalQueue {
-    queue: Worker<Coroutine>,
+    queue: Injector<Coroutine>,
 }
 
 impl GlobalQueue {
     pub(crate) fn new() -> GlobalQueue {
         Self {
-            queue: Worker::new_fifo(),
+            queue: Injector::new(),
         }
     }
 
@@ -82,7 +83,7 @@ impl GlobalQueue {
         self.queue.len()
     }
 
-    pub(crate) fn get_ref(&self) -> &Worker<Coroutine> {
+    pub(crate) fn get_ref(&self) -> &Injector<Coroutine> {
         &self.queue
     }
 
@@ -91,8 +92,7 @@ impl GlobalQueue {
         dest: &Worker<Coroutine>,
         limit: usize,
     ) -> Steal<Coroutine> {
-        let s = self.queue.stealer();
-        s.steal_batch_with_limit_and_pop(dest, limit)
+        self.queue.steal_batch_with_limit_and_pop(dest, limit)
     }
 }
 

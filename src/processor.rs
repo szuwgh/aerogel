@@ -78,9 +78,9 @@ pub(crate) struct Shard {
     others: Box<[Other]>,
 
     //全局队列
-    queue: Arc<GlobalQueue>,
+  pub(crate)   queue: Arc<GlobalQueue>,
 
-    idle: Idle,
+  pub(crate)   idle: Idle,
 
     steal_order: RandomOrder,
 }
@@ -93,6 +93,12 @@ impl Shard {
             queue: Arc::new(GlobalQueue::new()),
             idle: Idle::new(),
             steal_order: RandomOrder::new(count),
+        }
+    }
+
+    pub(crate) fn unpark_one(&self) {
+        if let Some(i) = self.idle.processor_to_notify() {
+            self.others[i].unparker.unpark();
         }
     }
 }
@@ -150,12 +156,12 @@ impl Processor {
     }
 
     pub(crate) fn push(&self, t: Coroutine) {
-        if self.local.queue.len() >= LQ_SIZE {
-            //转移一半到全局队列
-            self.local
-                .queue
-                .steal_batch_with_limit(self.shard.queue.get_ref(), LQ_HALF_SIZE);
-        }
+        // if self.local.queue.len() >= LQ_SIZE {
+        //     //转移一半到全局队列
+        //     self.local
+        //         .queue
+        //         .steal_batch_with_limit(self.shard.queue.get_ref(), LQ_HALF_SIZE);
+        // }
         let _ = self.local.queue.push(t);
 
         // .or_else(|e| -> Result<(), Coroutine> {

@@ -13,3 +13,5 @@ Cargo.lock
 
 /target
 /example/target
+
+.vscode

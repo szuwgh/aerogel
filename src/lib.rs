@@ -14,7 +14,7 @@ mod task;
 use crate::processor::Processor;
 use crate::processor::{run, EX};
 use crate::queue::LocalQueue;
-use crossbeam_channel::bounded;
+pub use crossbeam_channel::bounded;
 pub use crossbeam_channel::Receiver;
 pub use crossbeam_channel::Sender;
 use crossbeam_utils::sync::Parker;
@@ -31,12 +31,23 @@ use std::{
     pin::Pin,
     task::{Poll, Waker},
 };
+use once_cell::sync::Lazy;
 mod machine;
 use crate::machine::ThreadPool;
+
+pub(crate) static RUNTIME: Lazy<Runtime> = Lazy::new(|| {
+    // Runtime::new(3)
+    Runtime::new(num_cpus::get_physical())
+});
+
+
+unsafe impl Sync for Runtime {}
+unsafe impl Send for Runtime {}
 
 pub struct Runtime {
     main_p: Arc<Processor>,
     ex: Executor,
+    share: Arc<Shard>,
 }
 
 pub fn go<T>(fut: T) -> JoinHandle<T::Output>
@@ -54,20 +65,15 @@ pub fn spawn<T>(fut: T) -> JoinHandle<T::Output>
 where
     T: Future + Send + 'static,
 {
-    let (task, join) = new_task(0, fut, LocalScheduler);
-    EX.with(|ex| {
-        ex.0.push(task);
-        ex.0.unpark_one();
-    });
-
-    join
+    RUNTIME.spawn(fut)
 }
 
 impl Runtime {
     pub fn new(worker_threads: usize) -> Runtime {
         let mut others: Vec<Other> = Vec::new();
         let mut locals: Vec<Local> = Vec::new();
-        for _ in 0..worker_threads {
+        //这里需要+1 worker_threads+1 线程 一个用于main线程 worker_threads个子线程
+        for _ in 0..worker_threads+1 {
             let park = Parker::new();
             let queue = Arc::new(LocalQueue::new());
             others.push(Other::new(queue.clone(), park.unparker().clone()));
@@ -82,23 +88,23 @@ impl Runtime {
         ThreadPool::launch(&mut processors);
         Self {
             main_p: processors[0].clone(),
-            ex: Executor(processors[0].clone()),
+           ex: Executor(processors[0].clone()),
+            share:shard,
         }
     }
 
-    pub fn go<T>(&self, fut: T) -> JoinHandle<T::Output>
+
+    pub fn spawn<T>(&self, fut: T) -> JoinHandle<T::Output>
     where
         T: Future + Send + 'static,
     {
         let (task, join) = new_task(0, fut, LocalScheduler);
-        EX.set(&self.ex, || {
-            self.ex.0.push(task);
-            self.ex.0.unpark_one();
-        });
+        self.share.queue.push(task);
+        self.share.unpark_one();
         join
     }
 
-    pub fn block_on<F, T, O>(&mut self, f: F) -> O
+    pub fn block_on<F, T, O>(self, f: F) -> O
     where
         F: Fn() -> T,
         T: Future<Output = O> + 'static,
@@ -107,7 +113,6 @@ impl Runtime {
         let mut cx = Context::from_waker(&dummpy_waker);
         let mut fut = f();
         let mut future = unsafe { Pin::new_unchecked(&mut fut) };
-        // let cxe = Executor(self.main_p.clone());
         EX.set(&self.ex, || loop {
             match Future::poll(future.as_mut(), &mut cx) {
                 Poll::Ready(val) => {
