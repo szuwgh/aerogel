@@ -15,6 +15,7 @@ pub(crate) struct LocalScheduler;
 
 impl Schedule for LocalScheduler {
     fn schedule(&self, task: Coroutine) {
+        println!("重新调度");
         EX.with(|ex| {
             ex.0.push(task);
             ex.0.unpark_one();

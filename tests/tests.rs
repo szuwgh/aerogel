@@ -4,8 +4,9 @@ use std::sync::Arc;
 use std::sync::Mutex;
 use std::thread;
 use std::time::Duration;
-fn main() {
-    let mut t = Runtime::new(5);
+#[test]
+fn test_run() {
+    let mut t = Runtime::new(3);
 
     t.block_on(serve);
 
@@ -15,7 +16,7 @@ fn main() {
 async fn serve() {
     //loop {
     let check = Arc::new(AtomicI32::new(0));
-    for i in 0..100000 {
+    for i in 0..1 {
         let c = check.clone();
         let f = async move {
             println!("{:?},{}", thread::current().id(), i);

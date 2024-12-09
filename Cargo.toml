@@ -13,3 +13,4 @@ parking_lot = { version = "0.12.1" }
 crossbeam-epoch = "0.9.15"
 crossbeam-utils = "0.8.16"
 crossbeam-deque = "0.8"
+crossbeam-channel = "0.5.13"

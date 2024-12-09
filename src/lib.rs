@@ -14,6 +14,9 @@ mod task;
 use crate::processor::Processor;
 use crate::processor::{run, EX};
 use crate::queue::LocalQueue;
+use crossbeam_channel::bounded;
+pub use crossbeam_channel::Receiver;
+pub use crossbeam_channel::Sender;
 use crossbeam_utils::sync::Parker;
 use futures::future::Future;
 use futures::task::Context;
@@ -33,11 +36,19 @@ use crate::machine::ThreadPool;
 
 pub struct Runtime {
     main_p: Arc<Processor>,
+    ex: Executor,
 }
 
-fn go() {}
+pub fn go<T>(fut: T) -> JoinHandle<T::Output>
+where
+    T: Future + Send + 'static,
+{
+    spawn(fut)
+}
 
-fn chan() {}
+pub fn chan<T>(cap: usize) -> (Sender<T>, Receiver<T>) {
+    bounded(cap)
+}
 
 pub fn spawn<T>(fut: T) -> JoinHandle<T::Output>
 where
@@ -71,7 +82,20 @@ impl Runtime {
         ThreadPool::launch(&mut processors);
         Self {
             main_p: processors[0].clone(),
+            ex: Executor(processors[0].clone()),
         }
+    }
+
+    pub fn go<T>(&self, fut: T) -> JoinHandle<T::Output>
+    where
+        T: Future + Send + 'static,
+    {
+        let (task, join) = new_task(0, fut, LocalScheduler);
+        EX.set(&self.ex, || {
+            self.ex.0.push(task);
+            self.ex.0.unpark_one();
+        });
+        join
     }
 
     pub fn block_on<F, T, O>(&mut self, f: F) -> O
@@ -83,14 +107,14 @@ impl Runtime {
         let mut cx = Context::from_waker(&dummpy_waker);
         let mut fut = f();
         let mut future = unsafe { Pin::new_unchecked(&mut fut) };
-        let cxe = Executor(self.main_p.clone());
-        EX.set(&cxe, || loop {
+        // let cxe = Executor(self.main_p.clone());
+        EX.set(&self.ex, || loop {
             match Future::poll(future.as_mut(), &mut cx) {
                 Poll::Ready(val) => {
                     break val;
                 }
                 Poll::Pending => {
-                    cxe.0.schedule();
+                    self.ex.0.schedule();
                 }
             };
         })
