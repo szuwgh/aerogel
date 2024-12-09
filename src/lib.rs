@@ -6,16 +6,15 @@
 pub mod macros;
 //mod cell;
 mod coroutine;
-mod deque;
-mod park;
+//mod park;
 pub mod processor;
 mod queue;
-mod reactor;
+//mod reactor;
 mod task;
-use crate::park::Parker;
 use crate::processor::Processor;
 use crate::processor::{run, EX};
 use crate::queue::LocalQueue;
+use crossbeam_utils::sync::Parker;
 use futures::future::Future;
 use futures::task::Context;
 use processor::{Executor, Local, Other, Shard};
@@ -26,9 +25,8 @@ use crate::queue::LocalScheduler;
 use crate::task::new_task;
 use crate::task::JoinHandle;
 use std::{
-    mem,
     pin::Pin,
-    task::{Poll, RawWaker, RawWakerVTable, Waker},
+    task::{Poll, Waker},
 };
 mod machine;
 use crate::machine::ThreadPool;
@@ -47,7 +45,6 @@ where
 {
     let (task, join) = new_task(0, fut, LocalScheduler);
     EX.with(|ex| {
-        //let t = Coroutine::new(Routine::new(RefCell::new(fut.boxed_local())));
         ex.0.push(task);
         ex.0.unpark_one();
     });
@@ -59,11 +56,11 @@ impl Runtime {
     pub fn new(worker_threads: usize) -> Runtime {
         let mut others: Vec<Other> = Vec::new();
         let mut locals: Vec<Local> = Vec::new();
-        for _ in 0..(worker_threads + 1) {
+        for _ in 0..worker_threads {
             let park = Parker::new();
             let queue = Arc::new(LocalQueue::new());
-            others.push(Other::new(queue.clone(), park.unpark()));
-            locals.push(Local::new(queue.clone(), park.clone()));
+            others.push(Other::new(queue.clone(), park.unparker().clone()));
+            locals.push(Local::new(queue.clone(), park));
         }
         let shard = Arc::new(Shard::new(others));
         let mut processors: Vec<Arc<Processor>> = Vec::new();
@@ -90,7 +87,6 @@ impl Runtime {
         EX.set(&cxe, || loop {
             match Future::poll(future.as_mut(), &mut cx) {
                 Poll::Ready(val) => {
-                    // cxe.0.schedule();
                     break val;
                 }
                 Poll::Pending => {

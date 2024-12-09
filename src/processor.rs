@@ -1,11 +1,13 @@
-use crate::deque::{Steal, Stealer};
-use crate::park::{Parker, UnParker};
 use crate::queue::LocalQueue;
 use crate::queue::LQ_HALF_SIZE;
+use crate::queue::LQ_SIZE;
 use crate::queue::{self, GlobalQueue};
 use crate::rand::RandomOrder;
 use crate::rand::{seed, FastRand};
 use core::cmp;
+use crossbeam_deque::Steal;
+use crossbeam_utils::sync::Parker;
+use crossbeam_utils::sync::Unparker;
 use futures::future::Future;
 use futures::FutureExt;
 pub(crate) use parking_lot::Mutex;
@@ -40,6 +42,7 @@ pub struct Executor(pub(crate) Arc<Processor>);
 pub(crate) fn run(p: Arc<Processor>) {
     let cx = Executor(p);
     EX.set(&cx, || loop {
+        //循环调度
         cx.0.schedule();
     });
 }
@@ -96,11 +99,11 @@ impl Shard {
 
 pub(crate) struct Other {
     queue: Arc<LocalQueue>,
-    unparker: UnParker,
+    unparker: Unparker,
 }
 
 impl Other {
-    pub(crate) fn new(queue: Arc<LocalQueue>, unparker: UnParker) -> Self {
+    pub(crate) fn new(queue: Arc<LocalQueue>, unparker: Unparker) -> Self {
         Self {
             queue: queue,
             unparker: unparker,
@@ -147,27 +150,30 @@ impl Processor {
     }
 
     pub(crate) fn push(&self, t: Coroutine) {
-        let _ = self
-            .local
-            .queue
-            .push(t)
-            .or_else(|e| -> Result<(), Coroutine> {
-                let size = self.local.queue.len() / 2;
-                for _ in 0..size {
-                    if let Some(v) = self.local.queue.pop() {
-                        self.shard.queue.push(v);
-                    }
-                }
-                self.shard.queue.push(e);
-                Ok(())
-            });
+        if self.local.queue.len() >= LQ_SIZE {
+            //转移一半到全局队列
+            self.local
+                .queue
+                .steal_batch_with_limit(self.shard.queue.get_ref(), LQ_HALF_SIZE);
+        }
+        let _ = self.local.queue.push(t);
+
+        // .or_else(|e| -> Result<(), Coroutine> {
+        //     let size = self.local.queue.len() / 2;
+        //     for _ in 0..size {
+        //         if let Some(v) = self.local.queue.pop() {
+        //             self.shard.queue.push(v);
+        //         }
+        //     }
+        //     self.shard.queue.push(e);
+        //     Ok(())
+        // });
     }
 
     //调度
     pub(crate) fn schedule(&self) {
         //本地队列
         while let Some(t) = self.local.queue.pop() {
-            // println!("run in : p{}", self.index);
             t.run();
         }
         // steal 偷
@@ -179,7 +185,7 @@ impl Processor {
             t.run();
             return;
         }
-
+        //阻塞
         self.park();
     }
 
@@ -203,7 +209,6 @@ impl Processor {
             match t {
                 Steal::Empty => return None,
                 Steal::Success(t1) => {
-                    //   println!("steal global run");
                     return Some(t1);
                 }
                 Steal::Retry => continue,
@@ -222,7 +227,6 @@ impl Processor {
                 continue;
             }
             //从其他有G的P哪里偷取一半G过来，放到自己的P本地队列
-
             let stealer = self.shard.others[i].queue.stealer();
             let n = cmp::max(1, stealer.len() / 2);
             if n == 0 {
@@ -273,14 +277,14 @@ mod tests {
         let park1 = park.clone();
         let t = thread::spawn(move || {
             //thread::sleep(Duration::from_secs(2));
-            park1.park();
+            // park1.park();
             println!("bbbbb");
         });
 
         thread::sleep(Duration::from_secs(2));
 
-        park.unpark();
-        park.unpark();
+        // park.unpark();
+        // park.unpark();
         println!("aaa");
         //thread::sleep(Duration::from_secs(1));
         t.join().unwrap();
