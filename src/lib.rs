@@ -10,9 +10,11 @@ mod task;
 use crate::processor::Processor;
 use crate::processor::{run, EX};
 use crate::queue::LocalQueue;
-pub use crossbeam_channel::bounded;
-pub use crossbeam_channel::Receiver;
-pub use crossbeam_channel::Sender;
+pub use async_channel::bounded as channel;
+pub use async_channel::Receiver;
+pub use async_channel::Sender;
+pub use async_lock::RwLock as AsyncRwLock;
+pub use async_lock::Semaphore;
 use crossbeam_utils::sync::Parker;
 use futures::future::Future;
 use futures::task::Context;
@@ -53,7 +55,7 @@ where
 }
 
 pub fn chan<T>(cap: usize) -> (Sender<T>, Receiver<T>) {
-    bounded(cap)
+    channel(cap)
 }
 
 pub fn spawn<T>(fut: T) -> JoinHandle<T::Output>

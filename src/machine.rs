@@ -1,7 +1,7 @@
 use std::cell::Ref;
 use std::sync::{Arc, RwLock};
 
-use std::{cell::RefCell, num::NonZeroU64, thread};
+use std::thread;
 
 use crate::processor;
 use crate::processor::Processor;
