@@ -21,13 +21,6 @@ impl Schedule for LocalScheduler {
             ex.0.unpark_one();
         });
     }
-
-    // fn yield_now(&self, task: Coroutine) {
-    //     EX.with(|ex| {
-    //         ex.0.push(task);
-    //         ex.0.unpark_one();
-    //     });
-    // }
 }
 
 pub(crate) struct LocalQueue {

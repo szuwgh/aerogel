@@ -4,12 +4,8 @@
 
 #[macro_use]
 pub mod macros;
-//mod cell;
-mod coroutine;
-//mod park;
 pub mod processor;
 mod queue;
-//mod reactor;
 mod task;
 use crate::processor::Processor;
 use crate::processor::{run, EX};

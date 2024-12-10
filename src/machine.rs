@@ -11,24 +11,9 @@ pub(crate) struct ThreadPool;
 
 impl ThreadPool {
     pub(crate) fn launch(ps: &mut Vec<Arc<Processor>>) {
-        for (i,p) in ps.drain(..(ps.len()-1)).enumerate() {
-            println!("{}",i);
+        for (i, p) in ps.drain(..(ps.len() - 1)).enumerate() {
+            println!("{}", i);
             thread::spawn(|| processor::run(p));
         }
-    }
-}
-
-pub(crate) struct Machine {
-    id: usize,
-}
-
-impl Machine {
-    fn run<F>(&self, f: F)
-    where
-        F: FnOnce() + Send + 'static,
-    {
-        thread::spawn(|| {
-            f();
-        });
     }
 }
