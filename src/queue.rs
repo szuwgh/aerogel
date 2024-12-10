@@ -16,16 +16,18 @@ pub(crate) struct LocalScheduler;
 
 impl Schedule for LocalScheduler {
     fn schedule(&self, task: Coroutine) {
-        println!("重新调度");
         EX.with(|ex| {
             ex.0.push(task);
             ex.0.unpark_one();
         });
     }
 
-    fn yield_now(&self, task: Coroutine) {
-        self.schedule(task)
-    }
+    // fn yield_now(&self, task: Coroutine) {
+    //     EX.with(|ex| {
+    //         ex.0.push(task);
+    //         ex.0.unpark_one();
+    //     });
+    // }
 }
 
 pub(crate) struct LocalQueue {
@@ -42,10 +44,6 @@ impl LocalQueue {
         self.queue.pop()
     }
 
-    pub(crate) fn len(&self) -> usize {
-        self.queue.len()
-    }
-
     pub(crate) fn push(&self, t: Coroutine) {
         self.queue.push(t);
     }
@@ -53,11 +51,6 @@ impl LocalQueue {
     pub(crate) fn stealer(&self) -> Stealer<Coroutine> {
         self.queue.stealer()
     }
-
-    // pub(crate) fn steal_batch_with_limit(&self, dest: &Worker<Coroutine>, limit: usize) {
-    //     let s: Stealer<Task<LocalScheduler>> = self.queue.stealer();
-    //     let _ = s.steal_batch_with_limit(dest, limit);
-    // }
 
     pub(crate) fn get_ref(&self) -> &Worker<Coroutine> {
         &self.queue

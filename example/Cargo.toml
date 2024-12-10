@@ -5,3 +5,5 @@ edition = "2024"
 
 [dependencies]
 aerogel = {path="../"}
+tokio = {version ="1.40.0",features = ["full"]}
+async-channel = "=2.3.1"

@@ -15,29 +15,15 @@ use scoped_tls::scoped_thread_local;
 use std::cell::{RefCell, UnsafeCell};
 use std::rc::Rc;
 use std::sync::Arc;
-scoped_thread_local!(pub(crate) static EX: Executor);
+
 use crate::queue::Coroutine;
 use crate::queue::LocalScheduler;
 use crate::task::new_task;
 use crate::task::JoinHandle;
 use core::cell::Cell;
+
+scoped_thread_local!(pub(crate) static EX: Executor);
 pub struct Executor(pub(crate) Arc<Processor>);
-
-// impl Executor {
-//     pub(crate) fn spawn<T>(fut: T) -> JoinHandle<T::Output>
-//     where
-//         T: Future + Send + 'static,
-//     {
-//         let (task, join) = new_task(fut, LocalScheduler);
-//         EX.with(|ex| {
-//             //let t = Coroutine::new(Routine::new(RefCell::new(fut.boxed_local())));
-//             ex.0.push(task);
-//             ex.0.unpark_one();
-//         });
-
-//         join
-//     }
-// }
 
 pub(crate) fn run(p: Arc<Processor>) {
     let cx = Executor(p);
@@ -50,7 +36,7 @@ pub(crate) fn run(p: Arc<Processor>) {
 unsafe impl Send for Processor {}
 unsafe impl Sync for Processor {}
 
-struct Idle {
+pub(crate) struct Idle {
     // sleeping machine
     sleepers: Mutex<Vec<usize>>,
 }
@@ -78,9 +64,9 @@ pub(crate) struct Shard {
     others: Box<[Other]>,
 
     //全局队列
-  pub(crate)   queue: Arc<GlobalQueue>,
+    pub(crate) queue: Arc<GlobalQueue>,
 
-  pub(crate)   idle: Idle,
+    pub(crate) idle: Idle,
 
     steal_order: RandomOrder,
 }
@@ -156,24 +142,7 @@ impl Processor {
     }
 
     pub(crate) fn push(&self, t: Coroutine) {
-        // if self.local.queue.len() >= LQ_SIZE {
-        //     //转移一半到全局队列
-        //     self.local
-        //         .queue
-        //         .steal_batch_with_limit(self.shard.queue.get_ref(), LQ_HALF_SIZE);
-        // }
         let _ = self.local.queue.push(t);
-
-        // .or_else(|e| -> Result<(), Coroutine> {
-        //     let size = self.local.queue.len() / 2;
-        //     for _ in 0..size {
-        //         if let Some(v) = self.local.queue.pop() {
-        //             self.shard.queue.push(v);
-        //         }
-        //     }
-        //     self.shard.queue.push(e);
-        //     Ok(())
-        // });
     }
 
     //调度

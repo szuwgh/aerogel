@@ -27,19 +27,18 @@ mod rand;
 use crate::queue::LocalScheduler;
 use crate::task::new_task;
 use crate::task::JoinHandle;
+use once_cell::sync::Lazy;
 use std::{
     pin::Pin,
     task::{Poll, Waker},
 };
-use once_cell::sync::Lazy;
 mod machine;
 use crate::machine::ThreadPool;
 
 pub(crate) static RUNTIME: Lazy<Runtime> = Lazy::new(|| {
     // Runtime::new(3)
-    Runtime::new(num_cpus::get_physical())
+    Runtime::new(1)
 });
-
 
 unsafe impl Sync for Runtime {}
 unsafe impl Send for Runtime {}
@@ -73,7 +72,7 @@ impl Runtime {
         let mut others: Vec<Other> = Vec::new();
         let mut locals: Vec<Local> = Vec::new();
         //这里需要+1 worker_threads+1 线程 一个用于main线程 worker_threads个子线程
-        for _ in 0..worker_threads+1 {
+        for _ in 0..worker_threads + 1 {
             let park = Parker::new();
             let queue = Arc::new(LocalQueue::new());
             others.push(Other::new(queue.clone(), park.unparker().clone()));
@@ -88,11 +87,10 @@ impl Runtime {
         ThreadPool::launch(&mut processors);
         Self {
             main_p: processors[0].clone(),
-           ex: Executor(processors[0].clone()),
-            share:shard,
+            ex: Executor(processors[0].clone()),
+            share: shard,
         }
     }
-
 
     pub fn spawn<T>(&self, fut: T) -> JoinHandle<T::Output>
     where

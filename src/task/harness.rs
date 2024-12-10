@@ -80,7 +80,6 @@ where
         if res == Poll::Ready(()) {
             return PollFuture::Complete;
         }
-
         use super::state::TransitionToIdle;
         match self.header().state.transition_to_idle() {
             TransitionToIdle::Ok => PollFuture::Done,
