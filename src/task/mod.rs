@@ -86,10 +86,10 @@ where
     T: Future + 'static,
     T::Output: 'static,
 {
-    unsafe { new_task_holding(owner_id, task, scheduler) }
+    new_task_holding(owner_id, task, scheduler)
 }
 
-pub(crate) unsafe fn new_task_holding<T, S>(
+pub(crate) fn new_task_holding<T, S>(
     owner_id: usize,
     task: T,
     scheduler: S,

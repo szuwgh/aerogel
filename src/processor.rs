@@ -1,26 +1,18 @@
+use crate::job::Job;
+use crate::queue::GlobalQueue;
 use crate::queue::LocalQueue;
 use crate::queue::LQ_HALF_SIZE;
-use crate::queue::LQ_SIZE;
-use crate::queue::{self, GlobalQueue};
 use crate::rand::RandomOrder;
 use crate::rand::{seed, FastRand};
 use core::cmp;
 use crossbeam_deque::Steal;
 use crossbeam_utils::sync::Parker;
 use crossbeam_utils::sync::Unparker;
-use futures::future::Future;
-use futures::FutureExt;
-pub(crate) use parking_lot::Mutex;
+use parking_lot::Mutex;
+use parking_lot::MutexGuard;
 use scoped_tls::scoped_thread_local;
-use std::cell::{RefCell, UnsafeCell};
-use std::rc::Rc;
 use std::sync::Arc;
-
-use crate::queue::Coroutine;
-use crate::queue::LocalScheduler;
-use crate::task::new_task;
-use crate::task::JoinHandle;
-use core::cell::Cell;
+use std::thread;
 
 scoped_thread_local!(pub(crate) static EX: Executor);
 pub struct Executor(pub(crate) Arc<Processor>);
@@ -57,6 +49,10 @@ impl Idle {
         let mut sleepers = self.sleepers.lock();
         sleepers.pop()
     }
+
+    pub(crate) fn processor_to_all(&self) -> MutexGuard<Vec<usize>> {
+        self.sleepers.lock()
+    }
 }
 
 //共享数据
@@ -64,7 +60,7 @@ pub(crate) struct Shard {
     others: Box<[Other]>,
 
     //全局队列
-    pub(crate) queue: Arc<GlobalQueue>,
+    pub(crate) queue: GlobalQueue,
 
     pub(crate) idle: Idle,
 
@@ -76,7 +72,7 @@ impl Shard {
         let count = others.len();
         Self {
             others: others.into_boxed_slice(),
-            queue: Arc::new(GlobalQueue::new()),
+            queue: GlobalQueue::new(),
             idle: Idle::new(),
             steal_order: RandomOrder::new(count),
         }
@@ -85,6 +81,22 @@ impl Shard {
     pub(crate) fn unpark_one(&self) {
         if let Some(i) = self.idle.processor_to_notify() {
             self.others[i].unparker.unpark();
+        }
+    }
+
+    pub(crate) fn unpark_two(&self) {
+        let mut a = self.idle.processor_to_all();
+        for _ in 0..2 {
+            if let Some(i) = a.pop() {
+                self.others[i].unparker.unpark();
+            }
+        }
+    }
+
+    pub(crate) fn unpark_all(&self) {
+        let a = self.idle.processor_to_all();
+        for v in a.iter() {
+            self.others[*v].unparker.unpark();
         }
     }
 }
@@ -141,7 +153,7 @@ impl Processor {
         }
     }
 
-    pub(crate) fn push(&self, t: Coroutine) {
+    pub(crate) fn push(&self, t: Job) {
         let _ = self.local.queue.push(t);
     }
 
@@ -161,10 +173,46 @@ impl Processor {
             return;
         }
         //阻塞
+        thread::yield_now();
         self.park();
     }
 
-    pub(crate) fn steal_from_global(&self) -> Option<Coroutine> {
+    pub(crate) fn steal_job_from_glo(&self) -> Option<Job> {
+        let t = self.shard.queue.queue.steal();
+        match t {
+            Steal::Empty => None,
+            Steal::Success(t1) => {
+                return Some(t1);
+            }
+            Steal::Retry => None,
+        }
+    }
+    // self
+    // .shard
+    // .steal_order
+    // .start(self.local.fast_rand.fastrand() as usize)
+    pub(crate) fn steal_job(&self) -> Option<Job> {
+        let t = self.steal_job_from_glo().or_else(|| {
+            for i in 0..6 {
+                if i == self.index {
+                    continue;
+                }
+                let stealer = self.shard.others[i].queue.stealer();
+                let t = stealer.steal();
+                match t {
+                    Steal::Empty => continue,
+                    Steal::Success(t1) => {
+                        return Some(t1);
+                    }
+                    Steal::Retry => continue,
+                }
+            }
+            None
+        });
+        t
+    }
+
+    pub(crate) fn steal_from_global(&self) -> Option<Job> {
         // n =  min(len(GQ) / GOMAXPROCS +  1,  cap(LQ) / 2 ) 偷取公式
         // GQ：全局队列总长度（队列中现在元素的个数）
         // GOMAXPROCS：p的个数
@@ -192,7 +240,7 @@ impl Processor {
         None
     }
 
-    pub(crate) fn steal_from_others(&self) -> Option<Coroutine> {
+    pub(crate) fn steal_from_others(&self) -> Option<Job> {
         for i in self
             .shard
             .steal_order
@@ -211,7 +259,6 @@ impl Processor {
             match t {
                 Steal::Empty => continue,
                 Steal::Success(t1) => {
-                    //   println!("steal other run in : p{}", i);
                     return Some(t1);
                 }
                 Steal::Retry => continue,

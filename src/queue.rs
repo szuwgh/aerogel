@@ -1,12 +1,10 @@
+use crate::job::Job;
 use crate::task::Schedule;
-
-use crate::processor::EX;
 use crate::task::Task;
 use crossbeam_deque::Injector;
 use crossbeam_deque::Steal;
 use crossbeam_deque::Stealer;
 use crossbeam_deque::Worker;
-
 pub(crate) const LQ_SIZE: usize = 256;
 pub(crate) const LQ_HALF_SIZE: usize = LQ_SIZE / 2;
 
@@ -16,15 +14,16 @@ pub(crate) struct LocalScheduler;
 
 impl Schedule for LocalScheduler {
     fn schedule(&self, task: Coroutine) {
-        EX.with(|ex| {
-            ex.0.push(task);
-            ex.0.unpark_one();
-        });
+        // println!("重新调度");
+        // EX.with(|ex| {
+        //     ex.0.push(task);
+        //     ex.0.unpark_one();
+        // });
     }
 }
 
 pub(crate) struct LocalQueue {
-    queue: Worker<Coroutine>,
+    queue: Worker<Job>,
 }
 
 impl LocalQueue {
@@ -33,25 +32,25 @@ impl LocalQueue {
             queue: Worker::new_fifo(),
         }
     }
-    pub(crate) fn pop(&self) -> Option<Coroutine> {
+    pub(crate) fn pop(&self) -> Option<Job> {
         self.queue.pop()
     }
 
-    pub(crate) fn push(&self, t: Coroutine) {
+    pub(crate) fn push(&self, t: Job) {
         self.queue.push(t);
     }
 
-    pub(crate) fn stealer(&self) -> Stealer<Coroutine> {
+    pub(crate) fn stealer(&self) -> Stealer<Job> {
         self.queue.stealer()
     }
 
-    pub(crate) fn get_ref(&self) -> &Worker<Coroutine> {
+    pub(crate) fn get_ref(&self) -> &Worker<Job> {
         &self.queue
     }
 }
 
 pub(crate) struct GlobalQueue {
-    queue: Injector<Coroutine>,
+    pub(crate) queue: Injector<Job>,
 }
 
 impl GlobalQueue {
@@ -61,7 +60,7 @@ impl GlobalQueue {
         }
     }
 
-    pub(crate) fn push(&self, t: Coroutine) {
+    pub(crate) fn push(&self, t: Job) {
         self.queue.push(t)
     }
 
@@ -69,15 +68,15 @@ impl GlobalQueue {
         self.queue.len()
     }
 
-    pub(crate) fn get_ref(&self) -> &Injector<Coroutine> {
+    pub(crate) fn get_ref(&self) -> &Injector<Job> {
         &self.queue
     }
 
     pub(crate) fn steal_batch_with_limit_and_pop(
         &self,
-        dest: &Worker<Coroutine>,
+        dest: &Worker<Job>,
         limit: usize,
-    ) -> Steal<Coroutine> {
+    ) -> Steal<Job> {
         self.queue.steal_batch_with_limit_and_pop(dest, limit)
     }
 }

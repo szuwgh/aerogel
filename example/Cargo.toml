@@ -7,3 +7,6 @@ edition = "2024"
 aerogel = {path="../"}
 tokio = {version ="1.40.0",features = ["full"]}
 async-channel = "=2.3.1"
+futures = "0.3.31"
+smol = "=1.3.0"
+rayon = "=1.3.0"

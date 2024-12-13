@@ -1,5 +1,4 @@
-use std::cell::Ref;
-use std::sync::{Arc, RwLock};
+use std::sync::Arc;
 
 use std::thread;
 
@@ -12,8 +11,9 @@ pub(crate) struct ThreadPool;
 impl ThreadPool {
     pub(crate) fn launch(ps: &mut Vec<Arc<Processor>>) {
         for (i, p) in ps.drain(..(ps.len() - 1)).enumerate() {
-            println!("{}", i);
             thread::spawn(|| processor::run(p));
         }
     }
+
+    pub(crate) fn execute() {}
 }

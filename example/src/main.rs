@@ -1,82 +1,207 @@
-use aerogel::bounded;
 use aerogel::go;
-use aerogel::{Runtime, spawn};
+
+use aerogel::join;
+use aerogel::parallel::IntoParallelIterator;
+use aerogel::parallel::ParallelIterator as a;
+use futures::StreamExt;
+use futures::future::FutureExt;
+use futures::future::poll_fn;
+use futures::join;
+use rayon::iter::IntoParallelRefIterator;
+use rayon::iter::ParallelIterator;
+use std::pin::pin;
 use std::sync::Arc;
 use std::sync::atomic::AtomicI32;
 use std::thread;
 use std::time::Duration;
-use tokio::runtime::Builder;
-use tokio::sync::mpsc;
-use tokio::time::{self};
+use std::time::SystemTime;
+use std::time::UNIX_EPOCH;
 fn main() {
-    // let mut t = Runtime::new(2);
+    let a = vec![1.0; 1000000];
 
-    //t.block_on(serve);
-    let (s, r) = async_channel::bounded::<usize>(1); //bounded::<usize>(0);
-    // let s1 = Arc::new(s);
-    // let s3 = s1.clone();
+    let time1 = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap()
+        .as_nanos();
 
-    // let (s, mut r) = mpsc::channel::<usize>(1);
+    //  let b = &a[..];
+    let c = (&a[..]).par_iter().sum::<f64>();
+    let time2 = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap()
+        .as_nanos();
+    println!("{}", c);
+    println!("par:{}", time2 - time1);
 
-    // let rt = Builder::new_multi_thread()
-    //     .worker_threads(1)
-    //     .build()
-    //     .expect("Failed to create runtime");
-    go(async move {
-        //loop {
-        let check = Arc::new(AtomicI32::new(0));
-        for i in 0..2 {
-            let c = check.clone();
-            let _ = s.send(i).await;
+    let time1 = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap()
+        .as_nanos();
 
-            println!("send:{}", i);
-            // async {
-            //     thread::sleep(Duration::from_secs(1));
-            // }
-            // .await;
-        }
-        // thread::sleep(Duration::from_secs(5));
-        println!("check:{}", check.load(std::sync::atomic::Ordering::SeqCst));
-        // }
-    });
+    //  let b = &a[..];
+    let c = (&a[..]).par_iter().sum::<f64>();
+    let time2 = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap()
+        .as_nanos();
+    println!("{}", c);
+    println!("par:{}", time2 - time1);
 
-    go(async move {
-        thread::sleep(Duration::from_secs(1));
-        while let Ok(s) = r.recv().await {
-            println!("re:{}", s);
-        }
-    });
+    let time1 = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap()
+        .as_nanos();
 
-    // go(async move {
-    //     //loop {
-    //     let check = Arc::new(AtomicI32::new(0));
-    //     for i in 0..10 {
-    //         let c = check.clone();
-    //         async {
-    //             s3.send(i).unwrap();
-    //         }
-    //         .await;
+    let c = (&a[..]).into_aer_iter().sum::<f64>();
+    let time2 = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap()
+        .as_nanos();
+    println!("{}", c);
+    println!("aer:{}", time2 - time1);
 
-    //         println!("send:{}", i);
-    //         // async {
-    //         //     thread::sleep(Duration::from_secs(1));
-    //         // }
-    //         // .await;
-    //     }
-    //     thread::sleep(Duration::from_secs(5));
-    //     println!("check:{}", check.load(std::sync::atomic::Ordering::SeqCst));
-    //     // }
-    // });
-    // go(async move {
-    //     while let Ok(s) = async { r.recv() }.await {
-    //         println!("re:{}", s);
-    //     }
-    // });
-    // //thread::sleep(Duration::from_secs(2));
+    let time1 = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap()
+        .as_nanos();
 
-    // thread::sleep(Duration::from_secs(10));
+    //  let b = &a[..];
+    let c = (&a[..]).iter().sum::<f64>();
+    let time2 = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap()
+        .as_nanos();
+    println!("{}", c);
+    println!("{}", time2 - time1);
 
-    thread::sleep(Duration::from_secs(10));
+    // let time1 = SystemTime::now()
+    //     .duration_since(UNIX_EPOCH)
+    //     .unwrap()
+    //     .as_nanos();
+
+    // let c = (&a[..]).par_iter().sum::<f64>();
+    // let time2 = SystemTime::now()
+    //     .duration_since(UNIX_EPOCH)
+    //     .unwrap()
+    //     .as_nanos();
+    // println!("{}", c);
+    // println!("par:{}", time2 - time1);
+
+    // let time1 = SystemTime::now()
+    //     .duration_since(UNIX_EPOCH)
+    //     .unwrap()
+    //     .as_nanos();
+
+    // let c = (&a[..]).par_iter().sum::<f64>();
+    // let time2 = SystemTime::now()
+    //     .duration_since(UNIX_EPOCH)
+    //     .unwrap()
+    //     .as_nanos();
+    // println!("{}", c);
+    // println!("par:{}", time2 - time1);
+
+    // let time1 = SystemTime::now()
+    //     .duration_since(UNIX_EPOCH)
+    //     .unwrap()
+    //     .as_nanos();
+
+    // let c = (&a[..]).into_aer_iter().sum::<f64>();
+    // let time2 = SystemTime::now()
+    //     .duration_since(UNIX_EPOCH)
+    //     .unwrap()
+    //     .as_nanos();
+    // println!("{}", c);
+    // println!("aer:{}", time2 - time1);
+
+    // let c = (&a[..]).par_iter().sum::<f64>();
+    // let time2 = SystemTime::now()
+    //     .duration_since(UNIX_EPOCH)
+    //     .unwrap()
+    //     .as_nanos();
+    // println!("{}", c);
+    // println!("par:{}", time2 - time1);
+
+    // let time1 = SystemTime::now()
+    //     .duration_since(UNIX_EPOCH)
+    //     .unwrap()
+    //     .as_nanos();
+
+    // let c = (&a[..]).into_aer_iter().sum::<f64>();
+    // let time2 = SystemTime::now()
+    //     .duration_since(UNIX_EPOCH)
+    //     .unwrap()
+    //     .as_nanos();
+    // println!("{}", c);
+    // println!("aer:{}", time2 - time1);
+
+    // let time1 = SystemTime::now()
+    //     .duration_since(UNIX_EPOCH)
+    //     .unwrap()
+    //     .as_nanos();
+
+    // //  let b = &a[..];
+    // let c = (&a[..]).into_aer_iter().sum::<usize>();
+    // let time2 = SystemTime::now()
+    //     .duration_since(UNIX_EPOCH)
+    //     .unwrap()
+    //     .as_nanos();
+    // println!("{}", c);
+    // println!("{}", time2 - time1);
+
+    // let time1 = SystemTime::now()
+    //     .duration_since(UNIX_EPOCH)
+    //     .unwrap()
+    //     .as_nanos();
+    // //  let b = &a[..];
+    // let c = (&a[..]).into_aer_iter().sum::<usize>();
+    // let time2 = SystemTime::now()
+    //     .duration_since(UNIX_EPOCH)
+    //     .unwrap()
+    //     .as_nanos();
+    // println!("{}", c);
+    // println!("{}", time2 - time1);
+    // println!("===================");
+
+    // let time1 = SystemTime::now()
+    //     .duration_since(UNIX_EPOCH)
+    //     .unwrap()
+    //     .as_nanos();
+
+    // //  let b = &a[..];
+    // let c = (&a[..]).iter().sum::<f64>();
+    // let time2 = SystemTime::now()
+    //     .duration_since(UNIX_EPOCH)
+    //     .unwrap()
+    //     .as_nanos();
+    // println!("{}", c);
+    // println!("{}", time2 - time1);
+
+    // let time1 = SystemTime::now()
+    //     .duration_since(UNIX_EPOCH)
+    //     .unwrap()
+    //     .as_nanos();
+
+    // //  let b = &a[..];
+    // let c = (&a[..]).par_iter().sum::<usize>();
+    // let time2 = SystemTime::now()
+    //     .duration_since(UNIX_EPOCH)
+    //     .unwrap()
+    //     .as_nanos();
+    // println!("{}", c);
+    // println!("{}", time2 - time1);
+
+    // let time1 = SystemTime::now()
+    //     .duration_since(UNIX_EPOCH)
+    //     .unwrap()
+    //     .as_nanos();
+    // //  let b = &a[..];
+    // let c = (&a[..]).par_iter().sum::<usize>();
+    // let time2 = SystemTime::now()
+    //     .duration_since(UNIX_EPOCH)
+    //     .unwrap()
+    //     .as_nanos();
+    // println!("{}", c);
+    // println!("{}", time2 - time1);
 }
 
 async fn serve() {
@@ -92,7 +217,7 @@ async fn serve() {
             // }
             thread::sleep(Duration::from_micros(100));
         };
-        spawn(f);
+        // spawn(f);
     }
     thread::sleep(Duration::from_secs(5));
     println!("check:{}", check.load(std::sync::atomic::Ordering::SeqCst));

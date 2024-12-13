@@ -55,7 +55,6 @@ impl RawTask {
     {
         let ptr = Box::into_raw(Cell::new(owner_id, task, scheduler));
         let ptr = unsafe { NonNull::new_unchecked(ptr as *mut Header) };
-
         RawTask { ptr }
     }
 
