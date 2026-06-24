@@ -1,9 +1,9 @@
-use crate::job::Job;
-use crate::queue::GlobalQueue;
-use crate::queue::LocalQueue;
-use crate::queue::LQ_HALF_SIZE;
-use crate::rand::RandomOrder;
-use crate::rand::{seed, FastRand};
+use crate::runtime::job::Job;
+use crate::runtime::queue::GlobalQueue;
+use crate::runtime::queue::LocalQueue;
+use crate::runtime::queue::LQ_HALF_SIZE;
+use crate::runtime::rand::RandomOrder;
+use crate::runtime::rand::{seed, FastRand};
 use core::cmp;
 use crossbeam_deque::Steal;
 use crossbeam_utils::sync::Parker;
@@ -187,13 +187,14 @@ impl Processor {
             Steal::Retry => None,
         }
     }
-    // self
-    // .shard
-    // .steal_order
-    // .start(self.local.fast_rand.fastrand() as usize)
+
     pub(crate) fn steal_job(&self) -> Option<Job> {
         let t = self.steal_job_from_glo().or_else(|| {
-            for i in 0..6 {
+            for i in self
+                .shard
+                .steal_order
+                .start(self.local.fast_rand.fastrand() as usize)
+            {
                 if i == self.index {
                     continue;
                 }

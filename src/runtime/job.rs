@@ -1,9 +1,16 @@
+use crate::runtime::processor::Shard;
+use crate::runtime::runtime::RuntimeError;
 use parking_lot::Condvar;
 use parking_lot::Mutex;
-use std::fmt::Debug;
+use std::future::Future;
+use std::pin::Pin;
 use std::sync::atomic::AtomicBool;
 use std::sync::atomic::Ordering;
 use std::sync::Arc;
+pub(crate) trait JobAdapter {
+    fn as_job(&self) -> Job;
+}
+
 pub(crate) enum JobResult<T> {
     None,
     Ok(T),
@@ -47,8 +54,13 @@ where
             JobResult::Ok(x) => x,
         }
     }
+}
 
-    pub(crate) fn as_job(&self) -> Job {
+impl<F, R> JobAdapter for StackJob<F, R>
+where
+    F: FnOnce() -> R,
+{
+    fn as_job(&self) -> Job {
         unsafe fn execute<F, R>(data: *const ())
         where
             F: FnOnce() -> R,
@@ -93,6 +105,23 @@ where
         self.0.lock.wait();
         self.0.get_res()
     }
+}
+
+struct FutureJob<Fut>
+where
+    Fut: Future + Send + 'static,
+    Fut::Output: Send + 'static,
+{
+    future: Mutex<Option<Pin<Box<Fut>>>>,
+    state: Arc<AsyncState<Fut::Output>>,
+    shard: Arc<Shard>,
+    polling: AtomicBool,
+    wake_requested: AtomicBool,
+}
+
+pub struct AsyncState<T> {
+    result: Mutex<Option<Result<T, RuntimeError>>>,
+    join_waker: Mutex<Option<std::task::Waker>>,
 }
 
 pub struct SpinLatch {

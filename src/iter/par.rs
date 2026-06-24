@@ -1,7 +1,5 @@
-use crate::get_num;
-use crate::join;
-use crate::Runtime;
-use crate::RUNTIME;
+use crate::runtime::runtime::get_num;
+use crate::runtime::runtime::join;
 use std::iter;
 use std::iter::Sum;
 use std::marker::PhantomData;
@@ -20,10 +18,11 @@ where
         todo!()
     }
 }
+
 unsafe impl<S: Send> Send for SumConsumer<S> {}
 pub trait IntoParallelIterator {
     type Iter: ParallelIterator;
-    fn into_aer_iter(&self) -> Self::Iter;
+    fn into_par_iter(&self) -> Self::Iter;
 }
 
 fn sum<PI, S>(iter: PI) -> S
@@ -183,7 +182,7 @@ where
     P: Producer,
     C: Consumer<P::It>,
 {
-    if cost > 1 && len > 1 {
+    if cost > 1 && len > 1024 {
         let mid = len / 2;
         let (left_producer, right_producer) = p.split_at(mid);
         let (left_result, right_result) = join(
@@ -229,15 +228,31 @@ impl<'a, T: Send + Sync + 'a> Producer for SliceIter<'a, T> {
 
 impl<'a, T: Send + Sync> IntoParallelIterator for &'a [T] {
     type Iter = SliceIter<'a, T>;
-    fn into_aer_iter(&self) -> SliceIter<'a, T> {
+    fn into_par_iter(&self) -> SliceIter<'a, T> {
         SliceIter { slice: self }
     }
 }
 
 impl<'a, T: Send + Sync> IntoParallelIterator for &'a Vec<T> {
     type Iter = SliceIter<'a, T>;
-    fn into_aer_iter(&self) -> SliceIter<'a, T> {
+    fn into_par_iter(&self) -> SliceIter<'a, T> {
         SliceIter { slice: self }
+    }
+}
+
+pub trait IntoParallelRefIterator<'data> {
+    type Iter: ParallelIterator;
+    type Item: Sync + 'data;
+
+    fn par_iter(&'data self) -> Self::Iter;
+}
+
+impl<'data, T: Sync + Send + 'data> IntoParallelRefIterator<'data> for [T] {
+    type Item = T;
+    type Iter = SliceIter<'data, T>;
+
+    fn par_iter(&'data self) -> Self::Iter {
+        self.into_par_iter()
     }
 }
 
@@ -256,7 +271,7 @@ mod tests {
             .as_nanos();
 
         //  let b = &a[..];
-        let c = (&a[..]).into_aer_iter().sum::<usize>();
+        let c = (&a[..]).into_par_iter().sum::<usize>();
         let time2 = SystemTime::now()
             .duration_since(UNIX_EPOCH)
             .unwrap()
@@ -270,7 +285,7 @@ mod tests {
             .as_nanos();
 
         //  let b = &a[..];
-        let c = (&a[..]).into_aer_iter().sum::<usize>();
+        let c = (&a[..]).into_par_iter().sum::<usize>();
         let time2 = SystemTime::now()
             .duration_since(UNIX_EPOCH)
             .unwrap()
@@ -283,7 +298,7 @@ mod tests {
             .unwrap()
             .as_nanos();
         //  let b = &a[..];
-        let c = (&a[..]).into_aer_iter().sum::<usize>();
+        let c = (&a[..]).into_par_iter().sum::<usize>();
         let time2 = SystemTime::now()
             .duration_since(UNIX_EPOCH)
             .unwrap()
